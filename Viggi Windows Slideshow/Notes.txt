@@ -1,0 +1,68 @@
+﻿These are the links that helped me:
+http://www.harding.edu/fmccown/screensaver/screensaver.html
+which linked to:
+http://www.codeproject.com/Articles/31376/Making-a-C-screensaver
+
+Deployment:
+	Change EXE to SCR
+	Copy to C:\Windows\SysWOW64
+
+Keyboard Features:
+	-Arrow keys to jump pictures
+	-X key to blacklist a picture (with confirmation dialog that self-destructs after 5 seconds)
+	-L key to toggle Labeling
+	-R key to toggle Random
+	-Maybe a way to change interval on the fly (anytime 4 digits are typed, interpret as milliseconds)?
+	-Enter key to leave screensaver and go to pic in Explorer
+
+
+Settings:
+	-Directories and Files
+		FIRST: Top-level directory
+		LATER: UI to individually check pics or parent folders
+		THEN:  Add ability to add multiple top-level directories
+	-Checkbox: Label Pics
+	-Checkbox: Random
+	-Int: Interval (s)
+
+**************************************************************************************************************
+
+TODOs:
+	-X key: blacklist
+	-Better directory selections
+		-Multiple top-level directories
+		-Custom checked sub-directories
+
+**************************************************************************************************************
+
+DEV NOTES:
+
+History:
+	Keep a list of previous images
+
+	i.e.
+	0: ImD
+	1: ImC
+	2: ImB
+	3: ImA
+
+	Always add newest image at start of list, then crop list to maxLength if needed
+
+	Use mHistoryIndex to go back in history:
+		During normal run, mHistoryIndex == -1
+		When user presses back, we increment the index (0, 1, 2, 3, ...)
+
+		Now when showing an image:
+			If(mHistoryIndex < 0)
+				Show new image and update history
+			Else
+				Show image at index, derement index, don't update history
+
+	So we have the direction and mHistoryIndex:
+										histIndex	Show From
+		direction < 0 && index < 0:		++			History
+		direction = 0 && index < 0:		0			?
+		direction > 0 && index < 0:		0			New
+		direction < 0 && index >= 0:	++			History
+		direction = 0 && index >= 0:	0			?
+		direction > 0 && index >= 0:	--			New/History
