@@ -29,7 +29,7 @@ namespace Viggi_Windows_Slideshow
                     //preview the screen saver
                     //args[1] is the handle to the preview window
 
-                    Application.Run(new MainForm(new IntPtr(long.Parse(args[1]))));
+                    Application.Run(new ScreensaverForm(new IntPtr(long.Parse(args[1]))));
                 }
                 else if (args[0].ToLower().Trim().Substring(0, 2) == "/c") //configure
                 {
@@ -56,7 +56,7 @@ namespace Viggi_Windows_Slideshow
         {
             foreach (Screen screen in Screen.AllScreens)
             {
-                MainForm screensaver = new MainForm(screen.Bounds);
+                ScreensaverForm screensaver = new ScreensaverForm(screen.Bounds);
                 screensaver.Show();
             }
         }

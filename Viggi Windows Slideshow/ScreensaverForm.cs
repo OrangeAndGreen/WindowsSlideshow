@@ -12,22 +12,30 @@ using System.Text.RegularExpressions;
 using System.Drawing.Imaging;
 using System.Diagnostics;
 
+//NOTE: EXE must be renamed to SCR and moved into C:\Windows (NOT in System32)
+
+//TODO:
+//Video-only mode
+//Stretch videos to full screen
+
 namespace Viggi_Windows_Slideshow
 {
-    public partial class MainForm : Form
+    public partial class ScreensaverForm : Form
     {
         private const int WakeMovementPixels = 20;
         private const int HistoryLength = 1000;
 
         private ConfigFile mConfig = null;
-        private List<string> mImages = null;
         private int mPicIndex = 0;
         private Image mCurImage = null;
 
         private bool mPlayingVideo = false;
+        private bool mVideoFinished = false;
+        private DateTime mVideoStartTime = DateTime.MinValue;
+        private const int MaxVideoDurationSeconds = 300; // 5 minutes max
 
         private System.Timers.Timer mTimer = null;
-        private Random mRandom = null;
+        private System.Timers.Timer mVideoCheckTimer = null;
 
         private string mMessage = null;
         private string mMessageLock = "messageLock";
@@ -35,14 +43,13 @@ namespace Viggi_Windows_Slideshow
 
         private bool mShowDebugInfo = false;
         private bool mShowHelp = false;
+        private bool mShowSettings = false;
 
         private List<int> mHistory = new List<int>();
         private int mHistoryIndex = -1;
 
         private bool IsPreviewMode = false;
         Point OriginalLocation = new Point(int.MaxValue, int.MaxValue);
-
-        private string mErrorMessages = "";
 
         #region Preview API's
 
@@ -62,7 +69,7 @@ namespace Viggi_Windows_Slideshow
 
         #region Constructors
 
-        public MainForm(Rectangle Bounds)
+        public ScreensaverForm(Rectangle Bounds)
         {
             InitializeComponent();
             this.Bounds = Bounds;
@@ -73,7 +80,7 @@ namespace Viggi_Windows_Slideshow
         }
 
         //This constructor is the handle to the select screen saver dialog preview window. It is used when in preview mode (/p)
-        public MainForm(IntPtr PreviewHandle)
+        public ScreensaverForm(IntPtr PreviewHandle)
         {
             InitializeComponent();
 
@@ -101,30 +108,84 @@ namespace Viggi_Windows_Slideshow
 
         private void RunScreensaver()
         {
+            LogMessage("Starting screensaver");
             mConfig = ConfigFile.Load(ConfigFile.ConfigPath);
 
-            //Build the image list
-            mImages = new List<string>();
-            foreach (string file in Directory.EnumerateFiles(mConfig.PicDirectory, "*", SearchOption.AllDirectories))
-            {
-                if(IsImage(file) || IsVideo(file))
-                    mImages.Add(file);
-            }
+            ImageServer.SetDirectory(mConfig.PicDirectory, mConfig.RandomOrder);
+
+            mediaPlayer.settings.mute = mConfig.MuteVideos;
 
             //Prepare the timer
             mTimer = new System.Timers.Timer(mConfig.IntervalMS);
             mTimer.Elapsed += OnTimedEvent;
             mTimer.AutoReset = true;
             mTimer.Enabled = true;
-            
+
+            mVideoCheckTimer = new System.Timers.Timer(1000);
+            mVideoCheckTimer.Elapsed += OnVideoCheckTimerElapsed;
+            mVideoCheckTimer.AutoReset = true;
+            mVideoCheckTimer.Enabled = true;
+
             LoadNextImage(1);
         }
 
-        private void OnTimedEvent(Object source, System.Timers.ElapsedEventArgs e)
+        private void OnTimedEvent(object source, System.Timers.ElapsedEventArgs e)
         {
             //Console.WriteLine("The Elapsed event was raised at {0}", e.SignalTime);
 
             LoadNextImage(1);
+        }
+
+        private void OnVideoCheckTimerElapsed(object source, System.Timers.ElapsedEventArgs e)
+        {
+            if (InvokeRequired)
+            {
+                Invoke(new Action(() => OnVideoCheckTimerElapsed(source, e)));
+                return;
+            }
+
+            try
+            {
+                // Check if video has finished
+                if (mVideoFinished)
+                {
+                    LogMessage("Video finished, transitioning to next item");
+                    LoadNextImage(1);
+                    mVideoFinished = false;
+                }
+                else if (mPlayingVideo)
+                {
+                    // Check for timeout - if video has been playing too long, force transition
+                    if ((DateTime.Now - mVideoStartTime).TotalSeconds > MaxVideoDurationSeconds)
+                    {
+                        LogMessage($"Video timeout reached ({MaxVideoDurationSeconds}s), forcing transition");
+                        mVideoFinished = true;
+                    }
+                    else
+                    {
+                        // Additional check: if we're supposed to be playing a video but the media player
+                        // is in a stopped or finished state, force transition
+                        try
+                        {
+                            if (mediaPlayer.playState == WMPLib.WMPPlayState.wmppsUndefined || mediaPlayer.playState == WMPLib.WMPPlayState.wmppsStopped) // Stopped or Undefined
+                            {
+                                LogMessage($"Video appears to be finished (state: {mediaPlayer.playState}), forcing transition");
+                                mVideoFinished = true;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            LogError("Error checking media player state", ex);
+                            // If we can't check the state, assume video is finished
+                            mVideoFinished = true;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError("Error in video check timer", ex);
+            }
         }
 
         private void UpdateImageIndex(int direction)
@@ -155,38 +216,23 @@ namespace Viggi_Windows_Slideshow
                 if (mHistoryIndex < 0)
                 {
                     //Load a new image (increment or random)
-                    if (mConfig.RandomOrder && mImages.Count > 0)
-                    {
-                        if (mRandom == null)
-                        {
-                            mRandom = new Random();
-                        }
-
-                        mPicIndex = mRandom.Next(0, mImages.Count - 1);
-                    }
-                    else
-                    {
-                        mPicIndex++;
-                    }
+                    //LogError("Getting next file index");
+                    mPicIndex = ImageServer.GetNextFileIndex(mConfig.VideosOnly);
 
                     //Update the history buffer
                     mHistory.Insert(0, mPicIndex);
+                    AppendHistory(ImageServer.ImageForIndex(mPicIndex, mConfig.VideosOnly));
                     if (mHistory.Count > HistoryLength)
                     {
                         //Remove the last entry to stay within the desired history length
                         mHistory.RemoveAt(mHistory.Count - 1);
                     }
-                    SaveHistory();
+                    //SaveHistory();
                 }
                 else
                 {
                     //Go to the image in the history
                     mPicIndex = mHistory[mHistoryIndex];
-                }
-
-                if (mPicIndex >= mImages.Count)
-                {
-                    mPicIndex = 0;
                 }
             }
             catch (Exception e)
@@ -200,6 +246,7 @@ namespace Viggi_Windows_Slideshow
         {
             try
             {
+                //LogMessage("Loading image");
                 //Reset the timer
                 mTimer.Interval = mConfig.IntervalMS;
 
@@ -211,19 +258,30 @@ namespace Viggi_Windows_Slideshow
                     mLabelCorner = (mLabelCorner + 1) % 4;
                 }
 
-                if (mPicIndex < mImages.Count)
+                //LogError("Getting image for index " + mPicIndex + " (load next image)");
+                LogMessage($"Memory usage: {GC.GetTotalMemory(true)}");
+                string file = ImageServer.ImageForIndex(mPicIndex, mConfig.VideosOnly);
+                if (file != null)
                 {
+                    if(mCurImage != null)
+                    {
+                        mainImage.Image = null;
+                        mCurImage.Dispose();
+                        mCurImage = null;
+                    }
                     mCurImage = null;
 
-                    if (IsImage(mImages[mPicIndex]))
+                    LogMessage($"Loading file: {file}");
+
+                    if (IsImage(file))
                     {
                         SetVisibilityForImage();
 
                         try
                         {
-                            mCurImage = Image.FromFile(mImages[mPicIndex]);
+                            mCurImage = Image.FromFile(file);
 
-                            int rotation = GetOrientationFromImage(mImages[mPicIndex]);
+                            int rotation = GetOrientationFromImage(file);
                             switch (rotation)
                             {
                                 case 3:
@@ -241,18 +299,19 @@ namespace Viggi_Windows_Slideshow
 
                             mTimer.Enabled = true;
                         }
-                        catch (Exception)
+                        catch (Exception e)
                         {
                             lock (mMessageLock)
                             {
-                                mMessage = "*** ERROR LOADING IMAGE *** " + mImages[mPicIndex];
-                                LogError(mMessage);
+                                mMessage = "*** ERROR LOADING IMAGE *** " + file;
+                                LogError(mMessage, e);
                             }
                         }
                     }
-                    else if(IsVideo(mImages[mPicIndex]) && !mPlayingVideo)
+                    else if(IsVideo(file) && !mPlayingVideo)
                     {
                         mPlayingVideo = true;
+                        mVideoFinished = false;
                         PlayVideo();
                     }
 
@@ -260,7 +319,7 @@ namespace Viggi_Windows_Slideshow
                 }
                 else
                 {
-                    LogError("No images available");
+                    LogMessage("No images available");
                     Finish();
                 }
             }
@@ -279,6 +338,22 @@ namespace Viggi_Windows_Slideshow
                 return;
             }
 
+            // Clean up video state when switching to image
+            if (mPlayingVideo)
+            {
+                try
+                {
+                    mediaPlayer.Ctlcontrols.stop();
+                    mediaPlayer.URL = "";
+                }
+                catch (Exception e)
+                {
+                    LogError("Error cleaning up video player", e);
+                }
+                mPlayingVideo = false;
+                mVideoFinished = false;
+            }
+
             mediaPlayer.Visible = false;
             mainImage.Visible = true;
         }
@@ -287,16 +362,43 @@ namespace Viggi_Windows_Slideshow
         {
             if (InvokeRequired)
             {
-                this.Invoke(new Action(PlayVideo));
+                Invoke(new Action(PlayVideo));
                 return;
             }
+
+            // Reset video state
+            mVideoFinished = false;
+            mVideoStartTime = DateTime.Now;
+            
+            // Stop any currently playing video and reset the media player
+            try
+            {
+                mediaPlayer.Ctlcontrols.stop();
+                mediaPlayer.URL = "";
+            }
+            catch (Exception e)
+            {
+                LogError("Error stopping previous video", e);
+            }
+
+            string name = ImageServer.ImageForIndex(mPicIndex, mConfig.VideosOnly);
+            LogMessage($"Playing video: {name}");
 
             mediaPlayer.Visible = true;
             mainImage.Visible = false;
 
             mTimer.Enabled = false;
 
-            mediaPlayer.URL = mImages[mPicIndex];
+            // Set the new video URL
+            try
+            {
+                mediaPlayer.URL = name;
+            }
+            catch (Exception e)
+            {
+                LogError($"Error setting video URL: {name}", e);
+                mVideoFinished = true; // Force transition to next item
+            }
         }
 
         public void UpdateMessages()
@@ -318,22 +420,23 @@ namespace Viggi_Windows_Slideshow
             {
                 //Build the info string
                 string info = "";
-
+                //LogError("Getting image for index " + mPicIndex + " (update messages)");
+                string file = ImageServer.ImageForIndex(mPicIndex, mConfig.VideosOnly);
                 if (mConfig.LabelPics || mConfig.Info)
-                    info += mImages[mPicIndex];
+                    info += file;
 
                 if (mConfig.Info)
                 {
                     if (info.Length > 0)
                         info += "\n\n";
-                    info += GetFileInfo(mImages[mPicIndex], mCurImage);
+                    info += GetFileInfo(file, mCurImage);
                 }
 
                 if (mShowDebugInfo)
                 {
                     if (info.Length > 0)
                         info += "\n\n";
-                    info += GetDebugString(GetOrientationFromImage(mImages[mPicIndex]));
+                    info += GetDebugString(GetOrientationFromImage(file));
                 }
 
                 if (mShowHelp)
@@ -341,6 +444,13 @@ namespace Viggi_Windows_Slideshow
                     if (info.Length > 0)
                         info += "\n\n";
                     info += GetHelpString();
+                }
+
+                if (mShowSettings)
+                {
+                    if (info.Length > 0)
+                        info += "\n\n";
+                    info += GetSettingsString();
                 }
 
                 lock (mMessageLock)
@@ -410,7 +520,7 @@ namespace Viggi_Windows_Slideshow
         private string GetDebugString(int rotation)
         {
             return "Debug Info:\n"
-                 + string.Format("Pic: index {0} of {1}\n", mPicIndex, mImages.Count)
+                 + string.Format("Pic: index {0} of {1} ({2})\n", mPicIndex, ImageServer.NumImages, ImageServer.NumVideos)
                  + string.Format("History: index {0} of {1}\n", mHistoryIndex, mHistory.Count)
                  + string.Format("Interval: {0} ms\n", mConfig.IntervalMS)
                  + string.Format("Rotation: {0}", rotation);
@@ -418,18 +528,36 @@ namespace Viggi_Windows_Slideshow
 
         private string GetHelpString()
         {
-            return "Keyboard Commands:\n"
-                 + "Left/Up/B:         Go to previous image\n"
-                 + "Right/Down/N: Go to next image\n"
-                 + "F:                       Show/hide filename\n"
-                 + "I:                        Show/hide image info\n"
-                 + "D:                      Show/hide debug info\n"
-                 + "H:                      Show/hide help\n"
-                 + "Return:              Exit and open folder for current image in Windows Explorer\n"
-                 + "Numbers:           Change image interval\n"
-                 + "                               1-5: 1-5 seconds\n"
-                 + "                               6/7/8/9: 10/20/30/60 seconds\n"
-                 + "                               0: Default interval";
+            return string.Join("\n", new List<string>
+            {
+                "Keyboard Commands:",
+                "Left/Up/B:     Go to previous image",
+                "Right/Down/N:  Go to next image",
+                "F:             Show/hide filename",
+                "I:             Show/hide image info",
+                "D:             Show/hide debug info",
+                "H:             Show/hide help",
+                "M:             Toggle video mute",
+                "Return:        Exit and open folder for current image in Windows Explorer",
+                "Numbers:       Change image interval",
+                "                   1-5: 1-5 seconds",
+                "                   6/7/8/9: 10/20/30/60 seconds",
+                "                   0: Default interval",
+        });
+        }
+
+        private string GetSettingsString()
+        {
+            return string.Join("\n", new List<string>
+            {
+                "Settings:",
+                $"Directory: {mConfig.PicDirectory}",
+                $"Interval: {mConfig.IntervalMS} ms",
+                $"Random: {mConfig.RandomOrder}",
+                $"Mute: {mConfig.MuteVideos}",
+                $"Total Images: {ImageServer.NumImages}",
+                $"Total Videos: {ImageServer.NumVideos}",
+            });
         }
 
         private string GetFileInfo(string path, Image image)
@@ -444,14 +572,35 @@ namespace Viggi_Windows_Slideshow
                     sizeString = string.Format("{0} x {1} ", image.Width, image.Height);
                 }
 
-                return string.Format("Size:                 {0}({1:0.0} kB)\n", sizeString, (double)info.Length / 1024)
-                     + string.Format("Taken:             {0}\n", GetDateTakenFromImage(path))
-                     + string.Format("Camera:           {0}\n", GetCameraInfoFromImage(path))
-                     + string.Format("Pics in Folder:  {0}", info.Directory.EnumerateFiles().Count());
+                List<string> lines = new List<string>();
+                
+                double kb = (double)info.Length / 1024;
+                lines.Add($"Size:                 {sizeString}({kb:0.0} kB)");
+
+                string date = GetDateTakenFromImage(path);
+                if (date.Length > 0)
+                {
+                    lines.Add($"Taken:             {date}");
+                }
+                else
+                {
+                    string modDate = (info.CreationTime < info.LastWriteTime ? info.CreationTime : info.LastWriteTime).ToShortDateString();
+                    lines.Add($"File Date:         {modDate}");
+                }
+
+                string camera = GetCameraInfoFromImage(path);
+                if (camera.Length > 0)
+                {
+                    lines.Add($"Camera:           {camera}");
+                }
+
+                lines.Add($"Pics in Folder:  {info.Directory.EnumerateFiles().Count()}");
+
+                return string.Join("\n", lines);
             }
             catch (Exception e)
             {
-                LogError("Error getting file info", e);
+                LogError($"File: {path}\nError getting file info", e);
                 return "(error) " + e.Message;
             }
         }
@@ -467,20 +616,31 @@ namespace Viggi_Windows_Slideshow
         {
             try
             {
-                using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read))
-                using (Image myImage = Image.FromStream(fs, false, false))
+                string extension = Path.GetExtension(path);
+                
+                switch(extension.ToLower())
                 {
-                    PropertyItem propItem = myImage.GetPropertyItem(36867);
-                    string dateTaken = r.Replace(Encoding.UTF8.GetString(propItem.Value), "-", 2);
+                    case ".jpg":
+                    case ".png":
+                    case ".jpeg":
+                    case ".bmp":
+                        using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read))
+                        using (Image myImage = Image.FromStream(fs, false, false))
+                        {
+                            PropertyItem propItem = myImage.GetPropertyItem(36867);
+                            string dateTaken = r.Replace(Encoding.UTF8.GetString(propItem.Value), "-", 2);
 
-                    dateTaken = RemoveTrailingZeroByte(dateTaken);
+                            dateTaken = RemoveTrailingZeroByte(dateTaken);
 
-                    return dateTaken.Trim();
+                            return dateTaken.Trim();
+                        }
+                    default:
+                        return "";
                 }
             }
             catch (Exception e)
             {
-                LogError("Error getting image date", e);
+                LogError($"File: {path}\nError getting image date", e);
                 return "?";
             }
         }
@@ -489,21 +649,31 @@ namespace Viggi_Windows_Slideshow
         {
             try
             {
-                using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read))
-                using (Image myImage = Image.FromStream(fs, false, false))
+                string extension = Path.GetExtension(path);
+                switch (extension.ToLower())
                 {
+                    case ".jpg":
+                    case ".png":
+                    case ".jpeg":
+                    case ".bmp":
+                        using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read))
+                        using (Image myImage = Image.FromStream(fs, false, false))
+                        {
 
-                    PropertyItem propItem = myImage.GetPropertyItem(0x010F);
-                    string cameraBrand = RemoveTrailingZeroByte(r.Replace(Encoding.UTF8.GetString(propItem.Value), "-", 2).Trim());
+                            PropertyItem propItem = myImage.GetPropertyItem(0x010F);
+                            string cameraBrand = RemoveTrailingZeroByte(r.Replace(Encoding.UTF8.GetString(propItem.Value), "-", 2).Trim());
 
-                    propItem = myImage.GetPropertyItem(0x0110);
-                    string cameraModel = RemoveTrailingZeroByte(r.Replace(Encoding.UTF8.GetString(propItem.Value), "-", 2).Trim());
-                    return string.Format("{0}: {1}", cameraBrand, cameraModel);
+                            propItem = myImage.GetPropertyItem(0x0110);
+                            string cameraModel = RemoveTrailingZeroByte(r.Replace(Encoding.UTF8.GetString(propItem.Value), "-", 2).Trim());
+                            return string.Format("{0}: {1}", cameraBrand, cameraModel);
+                        }
+                    default:
+                        return "";
                 }
             }
             catch (Exception e)
             {
-                LogError("Error getting camera info from image", e);
+                LogError($"File: {path}\nError getting camera info from image", e);
                 return "?";
             }
         }
@@ -537,7 +707,7 @@ namespace Viggi_Windows_Slideshow
             }
             catch (Exception e)
             {
-                LogError("Error getting orientation info from image", e);
+                LogError($"File: {path}\nError getting orientation info from image", e);
                 return -2;
             }
         }
@@ -566,26 +736,31 @@ namespace Viggi_Windows_Slideshow
 
         private void MainForm_KeyDown(object sender, KeyEventArgs e)
         {
+            //LogError("MainForm key press");
             HandleKeyPress(e.KeyCode);
         }
 
         private void mediaPlayer_KeyDownEvent(object sender, AxWMPLib._WMPOCXEvents_KeyDownEvent e)
         {
+            //LogError("MediaPlayer key press");
             HandleKeyPress((Keys)e.nKeyCode);
         }
 
         private void HandleKeyPress(Keys keyCode)
         {
-            //mMessage = string.Format("Key pressed: {0}", e.KeyCode);
+            LogMessage($"Key pressed: {keyCode}");
+
             try
             {
                 int nextDirection = 0;
                 switch (keyCode)
                 {
                     case Keys.Return:
+                    case Keys.O:
                         {
                             //Open Explorer at current image and exit
-                            FileInfo info = new FileInfo(mImages[mPicIndex]);
+                            //LogError("Getting image for index " + mPicIndex + " (key press)");
+                            FileInfo info = new FileInfo(ImageServer.ImageForIndex(mPicIndex, mConfig.VideosOnly));
                             Process.Start(info.DirectoryName);
 
                             if (!IsPreviewMode)
@@ -635,6 +810,11 @@ namespace Viggi_Windows_Slideshow
                             mShowHelp = !mShowHelp;
                             break;
                         }
+                    case Keys.S:
+                        {
+                            mShowSettings = !mShowSettings;
+                            break;
+                        }
                     case Keys.R:
                         {
                             //Toggle Random
@@ -642,9 +822,25 @@ namespace Viggi_Windows_Slideshow
                             mConfig.Save();
                             break;
                         }
+                    case Keys.M:
+                        {
+                            //Toggle Mute
+                            mConfig.MuteVideos = !mConfig.MuteVideos;
+                            mConfig.Save();
+
+                            mediaPlayer.settings.mute = mConfig.MuteVideos;
+                            break;
+                        }
                     case Keys.Q:
                         {
                             Finish();
+                            break;
+                        }
+                    case Keys.V:
+                        {
+                            //Toggle Videos-only
+                            mConfig.VideosOnly = !mConfig.VideosOnly;
+                            mConfig.Save();
                             break;
                         }
                     case Keys.D0:
@@ -747,35 +943,66 @@ namespace Viggi_Windows_Slideshow
             }
         }
 
-        private void SaveHistory()
+        private void AppendHistory(string file)
         {
             try
             {
-                if (mHistory.Count > 0)
+                using (TextWriter writer = new StreamWriter(@"C:\Users\Dave\Desktop\screensaver history.txt", true))
                 {
-                    using (TextWriter writer = new StreamWriter(@"C:\Users\dave\Desktop\screensaver history.txt"))
-                    {
-                        foreach (int fileIndex in mHistory)
-                        {
-                            writer.WriteLine(mImages[fileIndex]);
-                        }
-                    }
+                    writer.WriteLine(file);
                 }
             }
             catch (Exception e)
             {
-                LogError("SaveHistory", e);
+                LogError("AppendHistory", e);
             }
         }
 
-        private void LogError(string message)
+        //private void SaveHistory()
+        //{
+        //    try
+        //    {
+        //        if (mHistory.Count > 0)
+        //        {
+        //            using (TextWriter writer = new StreamWriter(@"C:\Users\Dave\Desktop\screensaver history.txt"))
+        //            {
+        //                foreach (int fileIndex in mHistory)
+        //                {
+        //                    //LogError("Getting image for index " + fileIndex + " (save history)");
+        //                    writer.WriteLine(ImageServer.ImageForIndex(fileIndex));
+        //                }
+        //            }
+        //        }
+        //    }
+        //    catch (Exception e)
+        //    {
+        //        LogError("SaveHistory", e);
+        //    }
+        //}
+
+        //private void LogMessage(string message)
+        //{
+        //    using (TextWriter writer = new StreamWriter(@"C:\Users\dave\Desktop\screensaver log.txt", true))
+        //    {
+        //        writer.WriteLine(message);
+        //    }
+        //}
+
+        private void LogMessage(string message)
         {
-            mErrorMessages += DateTime.Now.ToString() + ": " + message + "\n";
+            try
+            {
+                using (TextWriter writer = new StreamWriter(@"C:\Users\dave\Desktop\screensaver error.txt", true))
+                {
+                    writer.WriteLine(DateTime.Now.ToString() + ": " + message);
+                }
+            }
+            catch (Exception) { }
         }
 
         private void LogError(string message, Exception e)
         {
-            LogError(message + ": " + e.Message);
+            LogMessage(message + ": " + e.Message + Environment.NewLine + e.StackTrace);
         }
 
         private void mediaPlayer_PlayStateChange(object sender, AxWMPLib._WMPOCXEvents_PlayStateChangeEvent e)
@@ -783,9 +1010,17 @@ namespace Viggi_Windows_Slideshow
             //The other possible states are defined here:
             //https://msdn.microsoft.com/en-us/library/windows/desktop/dd562460(v=vs.85).aspx
 
-            if (e.newState == 1)
+            LogMessage($"Video state changed to {e.newState}");
+            
+            // State 1 = Stopped (video finished)
+            // State 0 = Undefined (error or not loaded)
+            if (e.newState == 1 || e.newState == 0)
             {
-                LoadNextImage(1);
+                if (mPlayingVideo)
+                {
+                    LogMessage($"Video finished (state: {e.newState}), setting mVideoFinished = true");
+                    mVideoFinished = true;
+                }
             }
         }
 
@@ -831,6 +1066,7 @@ namespace Viggi_Windows_Slideshow
                 //see if the mouse has moved more than WakeMovementPixels pixels in any direction. If it has, close the application.
                 if (Math.Abs(location.X - OriginalLocation.X) > WakeMovementPixels || Math.Abs(location.Y - OriginalLocation.Y) > WakeMovementPixels)
                 {
+                    //LogError("Mouse moved far enough, finishing");
                     Finish();
                 }
             }
@@ -838,21 +1074,35 @@ namespace Viggi_Windows_Slideshow
 
         private void Finish()
         {
-            try
-            {
-                if (mErrorMessages.Length > 0)
-                {
-                    using (TextWriter writer = new StreamWriter(@"C:\Users\dave\Desktop\screensaver error.txt",true))
-                    {
-                        writer.WriteLine(mErrorMessages);
-                    }
-                }
-            }
-            catch (Exception) { }
-
+            //LogError("Shutting down image server");
+            ImageServer.Shutdown();
+            LogMessage("Quitting application");
             Application.Exit();
         }
 
         #endregion
+
+        private void mediaPlayer_ErrorEvent(object sender, EventArgs e)
+        {
+            LogMessage($"MP Error: {mediaPlayer.Error.Item[0].errorDescription}");
+            if (mPlayingVideo)
+            {
+                mVideoFinished = true;
+            }
+        }
+
+        private void mediaPlayer_MediaError(object sender, AxWMPLib._WMPOCXEvents_MediaErrorEvent e)
+        {
+            LogMessage($"MP Media Error");
+            if (mPlayingVideo)
+            {
+                mVideoFinished = true;
+            }
+        }
+
+        private void mediaPlayer_Warning(object sender, AxWMPLib._WMPOCXEvents_WarningEvent e)
+        {
+            LogMessage($"MP Warning: {e.description}");
+        }
     }
 }

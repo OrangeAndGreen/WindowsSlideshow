@@ -11,7 +11,7 @@ namespace Viggi_Windows_Slideshow
     {
         public const string ConfigPath = "ViggiSlideshowSettings.txt";
         public const int DefaultIntervalMS = 5000;
-        private const string DefaultPicDirectory = @"C:\Users\Public\Pictures\Sample Pictures";
+        private const string DefaultPicDirectory = @"E:\Pictures\For Slideshow";
         private const string RegistryKey = @"SOFTWARE\ViggiSlideshow";
 
         private const string DirectoryString = "Directory";
@@ -19,6 +19,8 @@ namespace Viggi_Windows_Slideshow
         private const string RandomString = "Random";
         private const string InfoString = "Info";
         private const string IntervalString = "Interval";
+        private const string MuteVideosString = "Mute";
+        private const string VideosOnlyString = "VideosOnly";
 
         public string Path { get; private set; }
 
@@ -27,6 +29,8 @@ namespace Viggi_Windows_Slideshow
         public bool Info { get; set; }
         public bool RandomOrder { get; set; }
         public int IntervalMS { get; set; }
+        public bool MuteVideos { get; set; }
+        public bool VideosOnly { get; set; }
 
         public static ConfigFile Load(string path)
         {
@@ -43,12 +47,14 @@ namespace Viggi_Windows_Slideshow
 
         private void Reset()
         {
-            this.Path = "";
-            this.PicDirectory = DefaultPicDirectory;
-            this.LabelPics = false;
-            this.Info = false;
-            this.RandomOrder = true;
-            this.IntervalMS = DefaultIntervalMS;
+            Path = "";
+            PicDirectory = DefaultPicDirectory;
+            LabelPics = false;
+            Info = false;
+            RandomOrder = true;
+            IntervalMS = DefaultIntervalMS;
+            MuteVideos = false;
+            VideosOnly = false;
         }
 
         public void LoadFromFile(string path)
@@ -57,7 +63,7 @@ namespace Viggi_Windows_Slideshow
 
             if (path != null)
             {
-                this.Path = path;
+                Path = path;
             }
 
             try
@@ -70,6 +76,8 @@ namespace Viggi_Windows_Slideshow
                     Info = (string)key.GetValue(InfoString) == "True";
                     RandomOrder = (string)key.GetValue(RandomString) == "True";
                     IntervalMS = (int)key.GetValue(IntervalString);
+                    MuteVideos = (string)key.GetValue(MuteVideosString) == "True";
+                    VideosOnly = (string)key.GetValue(VideosOnlyString) == "True";
                 }
 
                 //using (StreamReader reader = new StreamReader(path))
@@ -119,6 +127,8 @@ namespace Viggi_Windows_Slideshow
             key.SetValue(InfoString, Info);
             key.SetValue(RandomString, RandomOrder);
             key.SetValue(IntervalString, IntervalMS);
+            key.SetValue(MuteVideosString, MuteVideos);
+            key.SetValue(VideosOnlyString, VideosOnly);
 
             //using (StreamWriter writer = new StreamWriter(Path))
             //{

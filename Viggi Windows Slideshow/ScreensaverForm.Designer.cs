@@ -1,6 +1,6 @@
 ﻿namespace Viggi_Windows_Slideshow
 {
-    partial class MainForm
+    partial class ScreensaverForm
     {
         /// <summary>
         /// Required designer variable.
@@ -28,7 +28,7 @@
         /// </summary>
         private void InitializeComponent()
         {
-            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(MainForm));
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(ScreensaverForm));
             this.mainImage = new System.Windows.Forms.PictureBox();
             this.infoLabel = new System.Windows.Forms.Label();
             this.messageLabel = new System.Windows.Forms.Label();
@@ -39,9 +39,9 @@
             // 
             // mainImage
             // 
-            this.mainImage.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
-                        | System.Windows.Forms.AnchorStyles.Left)
-                        | System.Windows.Forms.AnchorStyles.Right)));
+            this.mainImage.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
             this.mainImage.Location = new System.Drawing.Point(-1, 0);
             this.mainImage.Name = "mainImage";
             this.mainImage.Size = new System.Drawing.Size(470, 385);
@@ -73,19 +73,22 @@
             // 
             // mediaPlayer
             // 
-            this.mediaPlayer.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
-                        | System.Windows.Forms.AnchorStyles.Left)
-                        | System.Windows.Forms.AnchorStyles.Right)));
+            this.mediaPlayer.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
             this.mediaPlayer.Enabled = true;
             this.mediaPlayer.Location = new System.Drawing.Point(-1, 0);
             this.mediaPlayer.Name = "mediaPlayer";
             this.mediaPlayer.OcxState = ((System.Windows.Forms.AxHost.State)(resources.GetObject("mediaPlayer.OcxState")));
             this.mediaPlayer.Size = new System.Drawing.Size(470, 385);
             this.mediaPlayer.TabIndex = 3;
+            this.mediaPlayer.MediaError += new AxWMPLib._WMPOCXEvents_MediaErrorEventHandler(this.mediaPlayer_MediaError);
             this.mediaPlayer.ClickEvent += new AxWMPLib._WMPOCXEvents_ClickEventHandler(this.mediaPlayer_ClickEvent);
             this.mediaPlayer.KeyDownEvent += new AxWMPLib._WMPOCXEvents_KeyDownEventHandler(this.mediaPlayer_KeyDownEvent);
             this.mediaPlayer.MouseMoveEvent += new AxWMPLib._WMPOCXEvents_MouseMoveEventHandler(this.mediaPlayer_MouseMoveEvent);
             this.mediaPlayer.PlayStateChange += new AxWMPLib._WMPOCXEvents_PlayStateChangeEventHandler(this.mediaPlayer_PlayStateChange);
+            this.mediaPlayer.ErrorEvent += new System.EventHandler(this.mediaPlayer_ErrorEvent);
+            this.mediaPlayer.Warning += new AxWMPLib._WMPOCXEvents_WarningEventHandler(this.mediaPlayer_Warning);
             // 
             // MainForm
             // 
