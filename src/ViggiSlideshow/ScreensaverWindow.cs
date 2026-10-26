@@ -24,7 +24,22 @@ internal sealed class ScreensaverWindow : Window
         Content = surface;
 
         // Physical pixels, which WPF's own Left/Top can't express across monitors of different scale
-        SourceInitialized += (_, _) => Native.CoverRect(new WindowInteropHelper(this).Handle, _bounds);
-        DpiChanged += (_, _) => Native.CoverRect(new WindowInteropHelper(this).Handle, _bounds);
+        SourceInitialized += (_, _) =>
+        {
+            nint handle = new WindowInteropHelper(this).Handle;
+            HwndSource.FromHwnd(handle).AddHook(HoldBounds);
+            Native.CoverRect(handle, _bounds);
+        };
+    }
+
+    /// <summary>
+    /// Pins every move and resize to the monitor. WPF otherwise resizes the window after we place
+    /// it, on Show and on a DPI change, leaving it short of the screen.
+    /// </summary>
+    private nint HoldBounds(nint hwnd, int msg, nint wParam, nint lParam, ref bool handled)
+    {
+        if (msg == Native.WmWindowPosChanging)
+            Native.ForceBounds(lParam, _bounds);
+        return 0;
     }
 }
