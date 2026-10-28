@@ -327,3 +327,32 @@ public class FrameSizeTests
         Assert.Null(FrameSize.DecodeWidth(800, 600, false, 1920, 1080));
     }
 }
+
+public class VideoStatsTests
+{
+    [Fact]
+    public void Expected_frames_follow_the_frame_rate_and_time_played()
+    {
+        var stats = new VideoStats(59.94, 10_000, 0, 0, 0, 0, 0, 0, 1);
+
+        Assert.Equal(599, stats.Expected);
+    }
+
+    [Fact]
+    public void Unknown_frame_rate_expects_nothing()
+    {
+        Assert.Equal(0, new VideoStats(0, 10_000, 0, 0, 0, 0, 0, 0, 1).Expected);
+        Assert.Equal(0, new VideoStats(30, 0, 0, 0, 0, 0, 0, 0, 1).DrawnFps);
+    }
+
+    [Fact]
+    public void Describes_every_count()
+    {
+        var stats = new VideoStats(30, 10_000, 300, 250, 50, 250, 200, 600, 2);
+
+        Assert.Equal(
+            "30 fps source, played 10.0 s, expected 300; VLC decoded 300, showed 250, lost 50; " +
+            "handed over 250, drawn 200 (20 fps), copy 3.0 ms avg; 2 playing at most",
+            stats.Describe());
+    }
+}

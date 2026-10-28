@@ -61,8 +61,8 @@ internal sealed class TestRun
         var library = new MediaLibrary();
         Task.Run(() => MediaScanner.Scan(_folder, new RealFileSystem(), library, new Random(), CancellationToken.None));
 
-        LibVLCSharp.Shared.Core.Initialize();
-        var vlc = new LibVLC("--quiet", "--no-osd", "--no-video-title-show", "--no-disable-screensaver");
+        // The same VLC setup as the real screensaver, so the frame counts match it
+        LibVLC vlc = ScreensaverSession.CreateVlc() ?? throw new InvalidOperationException("VLC didn't load");
 
         _surface = new SlideshowSurface();
         var window = new Window

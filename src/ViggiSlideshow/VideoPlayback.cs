@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Media;
@@ -42,6 +43,12 @@ internal sealed class VideoPlayback : IDisposable
     private bool _frameReady, _copyQueued;
 
     private static readonly List<Task> Teardowns = new();
+    private static readonly HashSet<VideoPlayback> Live = new();
+
+    // For the stats logged when the video closes
+    private long _handedOver, _drawn, _copyTicks, _playedMs;
+    private double _sourceFps;
+    private int _mostPlaying;
 
     private volatile bool _disposed;
     private bool _mute;
@@ -85,6 +92,12 @@ internal sealed class VideoPlayback : IDisposable
 
     public void Start()
     {
+        lock (Live)
+        {
+            Live.Add(this);
+            foreach (VideoPlayback video in Live)
+                video._mostPlaying = Math.Max(video._mostPlaying, Live.Count);
+        }
         if (!_player.Play())
             Post(() => Failed?.Invoke("VLC wouldn't start it"));
     }
@@ -107,6 +120,9 @@ internal sealed class VideoPlayback : IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        LogStats();
+        lock (Live)
+            Live.Remove(this);
 
         _player.EndReached -= OnEndReached;
         _player.EncounteredError -= OnError;
@@ -202,6 +218,7 @@ internal sealed class VideoPlayback : IDisposable
         {
             (_writeBuffer, _readyBuffer) = (_readyBuffer, _writeBuffer);
             _frameReady = true;
+            _handedOver++;
             if (!_copyQueued)
             {
                 _copyQueued = true;
@@ -219,7 +236,11 @@ internal sealed class VideoPlayback : IDisposable
     private void OnTimeChanged(object? sender, MediaPlayerTimeChangedEventArgs e)
     {
         long time = e.Time;
-        Post(() => Progress?.Invoke(time));
+        Post(() =>
+        {
+            _playedMs = time;
+            Progress?.Invoke(time);
+        });
     }
 
     private void OnPlaying(object? sender, EventArgs e) => Post(() =>
@@ -247,6 +268,7 @@ internal sealed class VideoPlayback : IDisposable
                 return;
             _frameReady = false;
 
+            long started = Stopwatch.GetTimestamp();
             bitmap.Lock();
             try
             {
@@ -263,6 +285,8 @@ internal sealed class VideoPlayback : IDisposable
             finally
             {
                 bitmap.Unlock();
+                _drawn++;
+                _copyTicks += Stopwatch.GetTimestamp() - started;
             }
         }
 
@@ -286,6 +310,8 @@ internal sealed class VideoPlayback : IDisposable
             if (index >= 0 && tracks[index].Data.Video is { Width: > 0 } video)
             {
                 _infoRaised = true;
+                if (video.FrameRateNum > 0 && video.FrameRateDen > 0)
+                    _sourceFps = (double)video.FrameRateNum / video.FrameRateDen;
                 double aspect = video.SarNum > 0 && video.SarDen > 0 ? (double)video.SarNum / video.SarDen : 1.0;
                 DetailsKnown?.Invoke(new VideoDetails((int)video.Width, (int)video.Height, aspect, Rotation(video.Orientation), length));
             }
@@ -293,6 +319,26 @@ internal sealed class VideoPlayback : IDisposable
         catch (Exception e)
         {
             Log.Error($"Reading video details for {Path}", e);
+        }
+    }
+
+    private void LogStats()
+    {
+        try
+        {
+            if (_handedOver == 0)
+                return;
+            MediaStats vlc = _media.Statistics;
+            long handedOver;
+            lock (_frameLock)
+                handedOver = _handedOver;
+            var stats = new VideoStats(_sourceFps, _playedMs, vlc.DecodedVideo, vlc.DisplayedPictures, vlc.LostPictures,
+                handedOver, _drawn, Stopwatch.GetElapsedTime(0, _copyTicks).TotalMilliseconds, _mostPlaying);
+            Log.Info($"Frames for {Path}: {stats.Describe()}");
+        }
+        catch (Exception e)
+        {
+            Log.Error($"Reading video stats for {Path}", e);
         }
     }
 

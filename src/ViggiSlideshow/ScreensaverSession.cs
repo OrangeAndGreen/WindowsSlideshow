@@ -82,20 +82,31 @@ internal sealed class ScreensaverSession
         });
     }
 
-    private static LibVLC? CreateVlc()
+    internal static LibVLC? CreateVlc()
     {
         try
         {
             LibVLCSharp.Shared.Core.Initialize();
-            return new LibVLC(
+            var vlc = new LibVLC(
                 "--quiet",
                 "--no-osd",
                 "--no-video-title-show",
                 "--no-sub-autodetect-file",
                 "--no-snapshot-preview",
-                "--no-stats",
                 // VLC otherwise keeps the monitors awake while a video plays
-                "--no-disable-screensaver");
+                "--no-disable-screensaver",
+                // Fast bilinear, not bicubic, for shrinking frames to the screen: the CPU scaling
+                // dropped a third of 4K frames and two thirds of 5.3K GoPro frames
+                "--swscale-mode=0");
+            // Says whether the graphics card is decoding, or VLC fell back to the CPU
+            vlc.Log += (_, e) =>
+            {
+                if (e.Message.Contains("hardware", StringComparison.OrdinalIgnoreCase)
+                    || e.Message.Contains("D3D11VA", StringComparison.OrdinalIgnoreCase)
+                    || e.Message.Contains("DXVA", StringComparison.OrdinalIgnoreCase))
+                    Log.Info($"VLC {e.Module}: {e.Message}");
+            };
+            return vlc;
         }
         catch (Exception e)
         {
