@@ -79,6 +79,29 @@ internal static partial class Native
         return monitors.OrderByDescending(m => m.Primary).ToList();
     }
 
+    public const int WmWindowPosChanging = 0x0046;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowPos
+    {
+        public nint Hwnd, InsertAfter;
+        public int X, Y, Cx, Cy;
+        public uint Flags;
+    }
+
+    /// <summary>Rewrites a WM_WINDOWPOSCHANGING request so the window lands exactly on the bounds.</summary>
+    public static unsafe void ForceBounds(nint windowPos, Rect bounds)
+    {
+        var pos = (WindowPos*)windowPos;
+        pos->X = bounds.Left;
+        pos->Y = bounds.Top;
+        pos->Cx = bounds.Width;
+        pos->Cy = bounds.Height;
+        pos->Flags &= ~(SwpNoMove | SwpNoSize);
+    }
+
     public static void CoverRect(nint hwnd, Rect bounds) =>
         SetWindowPos(hwnd, HwndTopmost, bounds.Left, bounds.Top, bounds.Width, bounds.Height, SwpShowWindow | SwpNoActivate);
 }
