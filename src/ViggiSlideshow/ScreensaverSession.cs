@@ -16,7 +16,7 @@ internal sealed class ScreensaverSession
 
     private readonly RegistrySettingsStore _store = new();
     private readonly Settings _settings;
-    private readonly MediaLibrary _library = new();
+    private readonly MediaLibrary _library = new(hidden: HiddenFiles.Load(HiddenFiles.DefaultPath));
     private readonly CancellationTokenSource _scanCancel = new();
     private readonly List<(ScreensaverWindow Window, Slideshow Slideshow)> _screens = new();
     private LibVLC? _vlc;
@@ -30,7 +30,7 @@ internal sealed class ScreensaverSession
 
     public void Start()
     {
-        Log.Info($"Starting on {_settings.Folder} ({(_settings.Random ? "random" : "folder order")}, {_settings.VideoMode.Describe()})");
+        Log.Info($"Starting on {_settings.Folder} ({(_settings.Random ? "random" : "folder order")}, {_settings.VideoMode.Describe()}, {_library.Hidden.Count} hidden)");
         Native.GetCursorPos(out _startCursor);
 
         StartScan();
@@ -164,6 +164,9 @@ internal sealed class ScreensaverSession
                 Each(s => s.ApplyInterval());
                 Flash($"{_settings.IntervalMs / 1000} seconds per photo{(command.Digit == 0 ? " (default)" : "")}");
                 break;
+            case Command.HideFile:
+                HideFile(source);
+                break;
             case Command.OpenFolder:
                 OpenInExplorer(source.Current);
                 Finish();
@@ -172,6 +175,21 @@ internal sealed class ScreensaverSession
                 Finish();
                 break;
         }
+    }
+
+    // The file goes from every screen's history, but only the screen showing it moves on
+    private void HideFile(Slideshow source)
+    {
+        if (source.Current is not { } path)
+            return;
+        bool added = source.Hide(path);
+        foreach (var (_, slideshow) in _screens)
+        {
+            if (slideshow != source)
+                slideshow.Hide(path);
+        }
+        Log.Info(added ? $"Hidden from the show: {path}" : $"Already hidden: {path}");
+        source.Flash($"Hidden for good: {Path.GetFileName(path)}");
     }
 
     private void SaveAndRelabel()

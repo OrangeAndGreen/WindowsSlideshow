@@ -46,7 +46,7 @@ internal sealed class PreviewHost
         settings.VideoMode = VideoMode.PhotosOnly;
         settings.Random = true;
 
-        var library = new MediaLibrary();
+        var library = new MediaLibrary(hidden: HiddenFiles.Load(HiddenFiles.DefaultPath));
         string folder = settings.Folder;
         Task.Run(() =>
         {

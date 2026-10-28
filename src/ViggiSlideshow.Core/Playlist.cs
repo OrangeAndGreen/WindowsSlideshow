@@ -64,6 +64,14 @@ public sealed class Playlist
         _history.Remove(path);
     }
 
+    /// <summary>Hides a file for good and drops it from this screen's history.</summary>
+    public bool Hide(string path)
+    {
+        bool added = _library.Hide(path);
+        _history.Remove(path);
+        return added;
+    }
+
     private string? NextInOrder(VideoMode mode)
     {
         _walker ??= _walkerFactory(_history.Current ?? ResumeAfter);

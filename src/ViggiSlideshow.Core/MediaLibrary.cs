@@ -3,7 +3,7 @@ namespace ViggiSlideshow.Core;
 /// <summary>
 /// Every media file found so far, filled by <see cref="MediaScanner"/> on a background thread
 /// while the slideshow draws from it. Random draws come from a shuffle bag, so nothing repeats
-/// until everything has been shown once.
+/// until everything has been shown once. Files on the <see cref="HiddenFiles"/> list are left out.
 /// </summary>
 public sealed class MediaLibrary
 {
@@ -18,12 +18,16 @@ public sealed class MediaLibrary
     private readonly List<int> _videoBag = new();
 
     private readonly HashSet<string> _bad = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HiddenFiles _hidden;
     private volatile bool _scanComplete;
 
-    public MediaLibrary(Random? random = null)
+    public MediaLibrary(Random? random = null, HiddenFiles? hidden = null)
     {
         _random = random ?? new Random();
+        _hidden = hidden ?? new HiddenFiles();
     }
+
+    public HiddenFiles Hidden => _hidden;
 
     public bool ScanComplete
     {
@@ -37,7 +41,7 @@ public sealed class MediaLibrary
     public void Add(string path)
     {
         MediaKind kind = MediaFiles.Classify(path);
-        if (kind == MediaKind.None)
+        if (kind == MediaKind.None || _hidden.Contains(path))
             return;
 
         lock (_lock)
@@ -62,10 +66,25 @@ public sealed class MediaLibrary
             _bad.Add(path);
     }
 
+    /// <summary>
+    /// Hides a file for good: it is added to the saved hidden list and, like a bad file, never
+    /// drawn again this run. False when it was already hidden.
+    /// </summary>
+    public bool Hide(string path)
+    {
+        MarkBad(path);
+        return _hidden.Add(path);
+    }
+
+    /// <summary>True for a file that failed this run or is on the hidden list.</summary>
     public bool IsBad(string path)
     {
         lock (_lock)
-            return _bad.Contains(path);
+        {
+            if (_bad.Contains(path))
+                return true;
+        }
+        return _hidden.Contains(path);
     }
 
     /// <summary>A random file the mode allows, or null when none has been found yet.</summary>

@@ -28,6 +28,7 @@ without switching screensavers.
 | R | Random or folder order (folder order carries on from the picture on screen) |
 | 1-5, 6, 7, 8, 9 | Seconds per photo: 1-5, 10, 20, 30, 60; 0 for the default (5) |
 | S / D / H | Show settings / debug info / this list |
+| X | Hide this file from the show for good (see below) |
 | Enter / O | Open the file's folder in Explorer and exit |
 | Esc / Q | Exit |
 
@@ -49,6 +50,9 @@ so a stray key press doesn't end the show.
   scanned in the background in random folder order, so the show starts at once on a large library.
 - **Folder order** follows Explorer's sort (natural numbers, files before subfolders) and resumes
   where the last run left off.
+- **Hidden files** (the X key) are listed in `%LOCALAPPDATA%\ViggiSlideshow\hidden.txt`, one full
+  path per line. The scan and folder order leave them out from then on. To bring one back, delete
+  its line; blank lines and lines starting with `#` are ignored, and case doesn't matter.
 - **Settings** live in `HKCU\SOFTWARE\ViggiSlideshow`, the same values the old WinForms version used.
 
 ## Development

@@ -376,6 +376,18 @@ internal sealed class Slideshow : IDisposable
 
     public void SetRandom(bool random) => _playlist.Random = random;
 
+    /// <summary>
+    /// Hides a file for good: it leaves this screen's history, and if it's on screen here the show
+    /// moves on at once. False when it was already hidden.
+    /// </summary>
+    public bool Hide(string path)
+    {
+        bool added = _playlist.Hide(path);
+        if (string.Equals(Current, path, StringComparison.OrdinalIgnoreCase))
+            Advance(1);
+        return added;
+    }
+
     public void ApplyMute() => _video?.SetMute(!_audio || _settings.Mute);
 
     public void ApplyInterval() => RestartPhotoTimer();

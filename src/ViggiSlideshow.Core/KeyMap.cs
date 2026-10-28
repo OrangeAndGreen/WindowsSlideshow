@@ -16,6 +16,7 @@ public enum Command
     CycleVideos,
     SetInterval,
     OpenFolder,
+    HideFile,
     Quit,
 }
 
@@ -41,6 +42,7 @@ public static class KeyMap
         ("S", "Show or hide settings", Command.ToggleSettings, ["S"]),
         ("D", "Show or hide debug info", Command.ToggleDebug, ["D"]),
         ("H", "Show or hide this help", Command.ToggleHelp, ["H"]),
+        ("X", "Hide this file from the show for good", Command.HideFile, ["X"]),
         ("Enter / O", "Open the file's folder and exit", Command.OpenFolder, ["Return", "Enter", "O"]),
         ("Esc / Q", "Exit", Command.Quit, ["Escape", "Q"]),
     ];
