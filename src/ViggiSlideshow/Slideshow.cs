@@ -13,6 +13,7 @@ namespace ViggiSlideshow;
 internal sealed class Slideshow : IDisposable
 {
     private static readonly TimeSpan LoadTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
     private const int FailuresBeforePause = 25;
 
     private readonly SlideshowSurface _surface;
@@ -137,7 +138,10 @@ internal sealed class Slideshow : IDisposable
 
         if (kind == MediaKind.Video)
         {
-            StartVideo(path);
+            bool gpu = await NeedsGpuScaling(path);
+            if (token != _showToken || _disposed)
+                return;
+            StartVideo(path, gpu);
         }
         else
         {
@@ -192,7 +196,16 @@ internal sealed class Slideshow : IDisposable
         }
     }
 
-    private void StartVideo(string path)
+    private static async Task<bool> NeedsGpuScaling(string path)
+    {
+        Task<(int Width, int Height)?> read = Task.Run(() => MediaInfoReader.ReadVideoSize(path));
+        if (await Task.WhenAny(read, Task.Delay(ProbeTimeout)) != read)
+            return false;
+        return await read is { } size && FrameSize.NeedsGpuScaling(size.Width, size.Height);
+    }
+
+    /// <param name="gpu">Play it with Media Foundation, which shrinks frames on the graphics card, rather than VLC.</param>
+    private void StartVideo(string path, bool gpu)
     {
         if (_vlc is null)
         {
@@ -209,7 +222,10 @@ internal sealed class Slideshow : IDisposable
         VideoPlayback video;
         try
         {
-            video = new VideoPlayback(_vlc, path, _pixelWidth, _pixelHeight, _audio, mute: !_audio || _settings.Mute, _ui);
+            bool mute = !_audio || _settings.Mute;
+            video = gpu
+                ? new GpuVideoPlayback(path, _pixelWidth, _pixelHeight, mute, _ui)
+                : new VlcVideoPlayback(_vlc, path, _pixelWidth, _pixelHeight, _audio, mute, _ui);
         }
         catch (Exception e)
         {
@@ -268,15 +284,22 @@ internal sealed class Slideshow : IDisposable
         };
         video.Failed += reason =>
         {
-            if (_video == video)
-                Fail(path, reason);
+            if (_video != video)
+                return;
+            if (gpu && !shown)
+            {
+                Log.Info($"Media Foundation couldn't start {path} ({reason}); trying VLC");
+                StartVideo(path, gpu: false);
+                return;
+            }
+            Fail(path, reason);
         };
 
         if (_paused)
             SetPaused(false);
         _watchdogTimer.Start();
         video.Start();
-        Log.Info($"Playing {path}");
+        Log.Info($"Playing {path}{(gpu ? " (Media Foundation, scaled on the graphics card)" : "")}");
     }
 
     private void CheckVideo()

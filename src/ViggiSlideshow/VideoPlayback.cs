@@ -4,40 +4,31 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
-using LibVLCSharp.Shared;
-using MediaPlayer = LibVLCSharp.Shared.MediaPlayer;
 using ViggiSlideshow.Core;
 
 namespace ViggiSlideshow;
 
 /// <summary>
-/// One video, played by VLC into memory and copied into a <see cref="WriteableBitmap"/>, so it
-/// is drawn by WPF like a photo: no separate video window, nothing hidden behind it, and labels
-/// and fades work the same way.
+/// One video, decoded into memory and copied into a <see cref="WriteableBitmap"/>, so it is drawn
+/// by WPF like a photo: no separate video window, nothing hidden behind it, and labels and fades
+/// work the same way. <see cref="VlcVideoPlayback"/> plays most videos;
+/// <see cref="GpuVideoPlayback"/> plays the ones too big for VLC to shrink in time.
 ///
-/// The rules that keep it from hanging: VLC's callbacks and events never call back into VLC and
-/// never wait on the UI thread (they only post to it), and stopping and freeing the player
-/// happens on a background thread, so a stuck file can never freeze the screen. Every event
-/// arrives on the UI thread, and none arrives after <see cref="Dispose"/>.
+/// The player hands frames over on a thread of its own; they are swapped into a ready buffer and
+/// copied onto the bitmap on the UI thread. Player threads never wait on the UI thread (they only
+/// post to it), and closing the player happens off the UI thread, so a stuck file can never freeze
+/// the screen. Every event arrives on the UI thread, and none arrives after <see cref="Dispose"/>.
 /// </summary>
-internal sealed class VideoPlayback : IDisposable
+internal abstract class VideoPlayback : IDisposable
 {
     // About 1920x1080: plenty for a screensaver, and keeps the per-frame copy cheap on a 4K screen
     private const long MaxPixels = 2_100_000;
 
     private readonly Dispatcher _ui;
-    private readonly Media _media;
-    private readonly MediaPlayer _player;
     private readonly int _maxWidth, _maxHeight;
     private readonly object _frameLock = new();
 
-    // Kept in fields so the garbage collector can't free delegates VLC still holds
-    private readonly MediaPlayer.LibVLCVideoFormatCb _formatCallback;
-    private readonly MediaPlayer.LibVLCVideoCleanupCb _cleanupCallback;
-    private readonly MediaPlayer.LibVLCVideoLockCb _lockCallback;
-    private readonly MediaPlayer.LibVLCVideoDisplayCb _displayCallback;
-
-    // VLC draws into _writeBuffer; a finished frame is swapped into _readyBuffer for the UI to copy
+    // The player draws into _writeBuffer; a finished frame is swapped into _readyBuffer for the UI to copy
     private nint _writeBuffer, _readyBuffer;
     private int _width, _height, _pitch;
     private bool _frameReady, _copyQueued;
@@ -47,13 +38,11 @@ internal sealed class VideoPlayback : IDisposable
 
     // For the stats logged when the video closes
     private long _handedOver, _drawn, _copyTicks, _playedMs;
-    private double _sourceFps;
     private int _mostPlaying;
 
     private volatile bool _disposed;
-    private bool _mute;
     private bool _firstFrameRaised;
-    private bool _infoRaised;
+    private bool _detailsRaised;
 
     public string Path { get; }
     public WriteableBitmap? Bitmap { get; private set; }
@@ -65,30 +54,18 @@ internal sealed class VideoPlayback : IDisposable
     public event Action<long>? Progress;
     public event Action<VideoDetails>? DetailsKnown;
 
-    public VideoPlayback(LibVLC vlc, string path, int maxWidth, int maxHeight, bool audio, bool mute, Dispatcher ui)
+    protected VideoPlayback(string path, int maxWidth, int maxHeight, Dispatcher ui)
     {
         Path = path;
         _ui = ui;
         _maxWidth = maxWidth;
         _maxHeight = maxHeight;
-
-        _media = audio ? new Media(vlc, path, FromType.FromPath) : new Media(vlc, path, FromType.FromPath, ":no-audio");
-        _mute = mute;
-        // Hardware decoding, copied back to memory: 4K HEVC from GoPros and drones is far too slow without it
-        _player = new MediaPlayer(_media) { Mute = mute, EnableHardwareDecoding = true };
-
-        _formatCallback = OnFormat;
-        _cleanupCallback = OnCleanup;
-        _lockCallback = OnLock;
-        _displayCallback = OnDisplay;
-        _player.SetVideoFormatCallbacks(_formatCallback, _cleanupCallback);
-        _player.SetVideoCallbacks(_lockCallback, null, _displayCallback);
-
-        _player.EndReached += OnEndReached;
-        _player.EncounteredError += OnError;
-        _player.TimeChanged += OnTimeChanged;
-        _player.Playing += OnPlaying;
     }
+
+    protected bool IsDisposed => _disposed;
+
+    /// <summary>Frame rate the file says it has, for the stats; 0 if unknown.</summary>
+    protected double SourceFps { get; set; }
 
     public void Start()
     {
@@ -98,22 +75,12 @@ internal sealed class VideoPlayback : IDisposable
             foreach (VideoPlayback video in Live)
                 video._mostPlaying = Math.Max(video._mostPlaying, Live.Count);
         }
-        if (!_player.Play())
-            Post(() => Failed?.Invoke("VLC wouldn't start it"));
+        Play();
     }
 
-    public void SetMute(bool mute)
-    {
-        _mute = mute;
-        if (!_disposed)
-            _player.Mute = mute;
-    }
+    public abstract void SetMute(bool mute);
 
-    public void SetPaused(bool paused)
-    {
-        if (!_disposed)
-            _player.SetPause(paused);
-    }
+    public abstract void SetPaused(bool paused);
 
     public void Dispose()
     {
@@ -124,33 +91,12 @@ internal sealed class VideoPlayback : IDisposable
         lock (Live)
             Live.Remove(this);
 
-        _player.EndReached -= OnEndReached;
-        _player.EncounteredError -= OnError;
-        _player.TimeChanged -= OnTimeChanged;
-        _player.Playing -= OnPlaying;
-
-        // Stop can block for a while on a bad file, so it never runs on the UI thread
-        MediaPlayer player = _player;
-        Media media = _media;
-        Task teardown = Task.Run(() =>
+        Task teardown = Close().ContinueWith(_ =>
         {
-            try
-            {
-                player.Stop();
-                player.Dispose();
-                media.Dispose();
-            }
-            catch (Exception e)
-            {
-                Log.Error($"Closing video {Path}", e);
-            }
-            finally
-            {
-                // No callbacks run once Stop has returned
-                lock (_frameLock)
-                    FreeBuffers();
-            }
-        });
+            // No frames arrive once the player has closed
+            lock (_frameLock)
+                FreeBuffers();
+        }, TaskScheduler.Default);
         lock (Teardowns)
         {
             Teardowns.RemoveAll(t => t.IsCompleted);
@@ -167,19 +113,33 @@ internal sealed class VideoPlayback : IDisposable
         return Task.WhenAny(Task.WhenAll(pending), Task.Delay(timeout));
     }
 
-    // ---- VLC threads ----
+    protected abstract void Play();
 
-    private uint OnFormat(ref nint opaque, nint chroma, ref uint width, ref uint height, ref uint pitches, ref uint lines)
+    /// <summary>
+    /// Stops and frees the player without blocking the calling (UI) thread; the task completes
+    /// once no more frames can arrive.
+    /// </summary>
+    protected abstract Task Close();
+
+    /// <summary>The player's own frame counts for the stats, if it keeps them.</summary>
+    protected abstract (string Player, long? Decoded, long? Shown, long? Lost) PlayerStats();
+
+    /// <summary>Called on the UI thread when the first frame is shown, for players that learn the details then.</summary>
+    protected virtual void ReadDetails()
     {
-        var (w, h) = FrameSize.Fit((int)width, (int)height, _maxWidth, _maxHeight, MaxPixels);
+    }
+
+    // ---- Player threads ----
+
+    /// <summary>
+    /// Sizes the frames for a source of this size, scaled down to fit the screen, and allocates
+    /// buffers for them. Returns the size the player should draw at.
+    /// </summary>
+    protected (int Width, int Height, int Pitch, int Rows) SetFrameSize(int sourceWidth, int sourceHeight)
+    {
+        var (w, h) = FrameSize.Fit(sourceWidth, sourceHeight, _maxWidth, _maxHeight, MaxPixels);
         int pitch = (w * 4 + 31) & ~31;
         int rows = (h + 15) & ~15;
-
-        Marshal.Copy("RV32"u8.ToArray(), 0, chroma, 4);
-        width = (uint)w;
-        height = (uint)h;
-        pitches = (uint)pitch;
-        lines = (uint)rows;
 
         lock (_frameLock)
         {
@@ -197,21 +157,21 @@ internal sealed class VideoPlayback : IDisposable
             Bitmap = new WriteableBitmap(w, h, 96, 96, PixelFormats.Bgr32, null);
             _firstFrameRaised = false;
         });
-        return 1;
+        return (w, h, pitch, rows);
     }
 
-    private void OnCleanup(ref nint opaque)
+    /// <summary>The buffer the player draws the next frame into: BGRX rows of the pitch <see cref="SetFrameSize"/> returned.</summary>
+    protected nint WriteBuffer
     {
+        get
+        {
+            lock (_frameLock)
+                return _writeBuffer;
+        }
     }
 
-    private nint OnLock(nint opaque, nint planes)
-    {
-        lock (_frameLock)
-            Marshal.WriteIntPtr(planes, _writeBuffer);
-        return 0;
-    }
-
-    private void OnDisplay(nint opaque, nint picture)
+    /// <summary>The player finished drawing into <see cref="WriteBuffer"/>; queue it for the screen.</summary>
+    protected void FrameWritten()
     {
         bool queue = false;
         lock (_frameLock)
@@ -229,26 +189,37 @@ internal sealed class VideoPlayback : IDisposable
             Post(CopyFrame, DispatcherPriority.Render);
     }
 
-    private void OnEndReached(object? sender, EventArgs e) => Post(() => Ended?.Invoke());
+    protected void RaiseEnded() => Post(() => Ended?.Invoke());
 
-    private void OnError(object? sender, EventArgs e) => Post(() => Failed?.Invoke("VLC couldn't play it"));
+    protected void RaiseFailed(string reason) => Post(() => Failed?.Invoke(reason));
 
-    private void OnTimeChanged(object? sender, MediaPlayerTimeChangedEventArgs e)
+    protected void RaiseProgress(long timeMs) => Post(() =>
     {
-        long time = e.Time;
-        Post(() =>
-        {
-            _playedMs = time;
-            Progress?.Invoke(time);
-        });
+        _playedMs = timeMs;
+        Progress?.Invoke(timeMs);
+    });
+
+    /// <summary>Raises <see cref="DetailsKnown"/> once; called on the UI thread.</summary>
+    protected void RaiseDetails(VideoDetails details)
+    {
+        if (_detailsRaised)
+            return;
+        _detailsRaised = true;
+        DetailsKnown?.Invoke(details);
     }
 
-    private void OnPlaying(object? sender, EventArgs e) => Post(() =>
+    protected bool DetailsRaised => _detailsRaised;
+
+    protected void Post(Action action, DispatcherPriority priority = DispatcherPriority.Normal)
     {
-        // VLC can drop a mute set before its audio output exists, so set it again now
-        _player.Mute = _mute;
-        ReadDetails();
-    });
+        if (_disposed)
+            return;
+        _ui.BeginInvoke(priority, () =>
+        {
+            if (!_disposed)
+                action();
+        });
+    }
 
     // ---- UI thread ----
 
@@ -298,41 +269,17 @@ internal sealed class VideoPlayback : IDisposable
         }
     }
 
-    private void ReadDetails()
-    {
-        if (_disposed || _infoRaised)
-            return;
-        try
-        {
-            MediaTrack[] tracks = _media.Tracks;
-            long length = _player.Length;
-            int index = Array.FindIndex(tracks, t => t.TrackType == TrackType.Video);
-            if (index >= 0 && tracks[index].Data.Video is { Width: > 0 } video)
-            {
-                _infoRaised = true;
-                if (video.FrameRateNum > 0 && video.FrameRateDen > 0)
-                    _sourceFps = (double)video.FrameRateNum / video.FrameRateDen;
-                double aspect = video.SarNum > 0 && video.SarDen > 0 ? (double)video.SarNum / video.SarDen : 1.0;
-                DetailsKnown?.Invoke(new VideoDetails((int)video.Width, (int)video.Height, aspect, Rotation(video.Orientation), length));
-            }
-        }
-        catch (Exception e)
-        {
-            Log.Error($"Reading video details for {Path}", e);
-        }
-    }
-
     private void LogStats()
     {
         try
         {
-            if (_handedOver == 0)
-                return;
-            MediaStats vlc = _media.Statistics;
             long handedOver;
             lock (_frameLock)
                 handedOver = _handedOver;
-            var stats = new VideoStats(_sourceFps, _playedMs, vlc.DecodedVideo, vlc.DisplayedPictures, vlc.LostPictures,
+            if (handedOver == 0)
+                return;
+            var (player, decoded, shown, lost) = PlayerStats();
+            var stats = new VideoStats(player, SourceFps, _playedMs, decoded, shown, lost,
                 handedOver, _drawn, Stopwatch.GetElapsedTime(0, _copyTicks).TotalMilliseconds, _mostPlaying);
             Log.Info($"Frames for {Path}: {stats.Describe()}");
         }
@@ -340,25 +287,6 @@ internal sealed class VideoPlayback : IDisposable
         {
             Log.Error($"Reading video stats for {Path}", e);
         }
-    }
-
-    private static int Rotation(VideoOrientation orientation) => orientation switch
-    {
-        VideoOrientation.RightTop => 90,
-        VideoOrientation.BottomRight => 180,
-        VideoOrientation.LeftBottom => 270,
-        _ => 0,
-    };
-
-    private void Post(Action action, DispatcherPriority priority = DispatcherPriority.Normal)
-    {
-        if (_disposed)
-            return;
-        _ui.BeginInvoke(priority, () =>
-        {
-            if (!_disposed)
-                action();
-        });
     }
 
     private void FreeBuffers()

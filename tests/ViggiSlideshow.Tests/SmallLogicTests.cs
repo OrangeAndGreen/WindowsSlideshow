@@ -326,6 +326,16 @@ public class FrameSizeTests
         Assert.Equal(1440, FrameSize.DecodeWidth(4000, 3000, sidesSwapped: false, 1920, 1080));
         Assert.Null(FrameSize.DecodeWidth(800, 600, false, 1920, 1080));
     }
+
+    [Fact]
+    public void Only_videos_bigger_than_4K_are_scaled_on_the_graphics_card()
+    {
+        Assert.True(FrameSize.NeedsGpuScaling(5312, 2988));
+        Assert.True(FrameSize.NeedsGpuScaling(2988, 5312));
+        Assert.False(FrameSize.NeedsGpuScaling(3840, 2160));
+        Assert.False(FrameSize.NeedsGpuScaling(1920, 1080));
+        Assert.False(FrameSize.NeedsGpuScaling(0, 0));
+    }
 }
 
 public class VideoStatsTests
@@ -333,7 +343,7 @@ public class VideoStatsTests
     [Fact]
     public void Expected_frames_follow_the_frame_rate_and_time_played()
     {
-        var stats = new VideoStats(59.94, 10_000, 0, 0, 0, 0, 0, 0, 1);
+        var stats = new VideoStats("VLC", 59.94, 10_000, 0, 0, 0, 0, 0, 0, 1);
 
         Assert.Equal(599, stats.Expected);
     }
@@ -341,18 +351,29 @@ public class VideoStatsTests
     [Fact]
     public void Unknown_frame_rate_expects_nothing()
     {
-        Assert.Equal(0, new VideoStats(0, 10_000, 0, 0, 0, 0, 0, 0, 1).Expected);
-        Assert.Equal(0, new VideoStats(30, 0, 0, 0, 0, 0, 0, 0, 1).DrawnFps);
+        Assert.Equal(0, new VideoStats("VLC", 0, 10_000, 0, 0, 0, 0, 0, 0, 1).Expected);
+        Assert.Equal(0, new VideoStats("VLC", 30, 0, 0, 0, 0, 0, 0, 0, 1).DrawnFps);
     }
 
     [Fact]
     public void Describes_every_count()
     {
-        var stats = new VideoStats(30, 10_000, 300, 250, 50, 250, 200, 600, 2);
+        var stats = new VideoStats("VLC", 30, 10_000, 300, 250, 50, 250, 200, 600, 2);
 
         Assert.Equal(
             "30 fps source, played 10.0 s, expected 300; VLC decoded 300, showed 250, lost 50; " +
             "handed over 250, drawn 200 (20 fps), copy 3.0 ms avg; 2 playing at most",
+            stats.Describe());
+    }
+
+    [Fact]
+    public void Leaves_out_counts_the_player_doesnt_keep()
+    {
+        var stats = new VideoStats("Media Foundation", 30, 10_000, null, null, null, 300, 300, 600, 1);
+
+        Assert.Equal(
+            "30 fps source, played 10.0 s, expected 300; Media Foundation; " +
+            "handed over 300, drawn 300 (30 fps), copy 2.0 ms avg; 1 playing at most",
             stats.Describe());
     }
 }
