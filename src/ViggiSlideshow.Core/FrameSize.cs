@@ -21,6 +21,12 @@ public static class FrameSize
         return (width, height);
     }
 
+    /// <summary>
+    /// Whether a video is too big for VLC to shrink to the screen in time, so it goes to the
+    /// graphics card instead. VLC keeps up with 4K but drops a third of 5.3K frames.
+    /// </summary>
+    public static bool NeedsGpuScaling(int width, int height) => (long)width * height > 3840L * 2160;
+
     /// <summary>The image decode width that fits the box, for an image whose EXIF rotation swaps its sides.</summary>
     public static int? DecodeWidth(int pixelWidth, int pixelHeight, bool sidesSwapped, int boxWidth, int boxHeight)
     {

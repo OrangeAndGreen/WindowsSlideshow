@@ -79,5 +79,35 @@ internal static class MediaInfoReader
         }
     }
 
+    /// <summary>
+    /// The picture size from an MP4 or MOV file's track headers, read without decoding anything;
+    /// null for other files or if it can't be read.
+    /// </summary>
+    public static (int Width, int Height)? ReadVideoSize(string path)
+    {
+        string extension = Path.GetExtension(path);
+        if (!extension.Equals(".mp4", StringComparison.OrdinalIgnoreCase)
+            && !extension.Equals(".mov", StringComparison.OrdinalIgnoreCase)
+            && !extension.Equals(".m4v", StringComparison.OrdinalIgnoreCase))
+            return null;
+        try
+        {
+            using FileStream stream = File.OpenRead(path);
+            // Sound and data tracks have a size of 0, so the largest is the picture
+            return QuickTimeMetadataReader.ReadMetadata(stream)
+                .OfType<QuickTimeTrackHeaderDirectory>()
+                .Select(track => (Width: Dimension(track, QuickTimeTrackHeaderDirectory.TagWidth),
+                    Height: Dimension(track, QuickTimeTrackHeaderDirectory.TagHeight)))
+                .MaxBy(size => (long)size.Width * size.Height);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static int Dimension(QuickTimeTrackHeaderDirectory track, int tag) =>
+        track.TryGetDouble(tag, out double value) ? (int)value : 0;
+
     private static DateTime Earliest(DateTime a, DateTime b) => a < b ? a : b;
 }

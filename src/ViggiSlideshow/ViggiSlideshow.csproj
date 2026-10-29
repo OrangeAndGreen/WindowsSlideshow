@@ -32,6 +32,8 @@
     <PackageReference Include="LibVLCSharp" Version="3.10.2" />
     <PackageReference Include="MetadataExtractor" Version="2.9.3" />
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.24" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.MediaFoundation" Version="3.8.3" />
   </ItemGroup>
 
 </Project>

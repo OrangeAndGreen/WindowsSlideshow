@@ -42,6 +42,12 @@ so a stray key press doesn't end the show.
 - **Videos play through VLC** (LibVLCSharp), which handles everything in the library, from
   old camera AVI/MPG to 4K HEVC from GoPros and drones, with hardware decoding. VLC decodes into
   memory and WPF draws the frames, so videos crossfade and carry labels like photos do.
+- **Videos bigger than 4K play through Media Foundation** (Windows' own player), which shrinks each
+  frame to the screen on the graphics card, so only a screen-sized frame comes back to memory. VLC 3
+  can only shrink frames on the CPU, after copying the whole frame back from the card, and that held
+  5.3K GoPro videos to about 22 of 30 fps. The size comes from the file's track headers before it
+  plays; if Media Foundation can't start a file, VLC plays it instead. Each video's frame rate is in
+  the log when it closes.
 - **Nothing can stall it.** A file that won't decode, a video VLC rejects, one that never starts,
   stalls, or plays slower than real time: each is logged, skipped for the rest of the run, and the
   show moves on. VLC is never called from its own callbacks, and players are stopped on a
