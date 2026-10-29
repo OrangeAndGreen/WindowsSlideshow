@@ -59,6 +59,10 @@ so a stray key press doesn't end the show.
 - **Hidden files** (the X key) are listed in `%LOCALAPPDATA%\ViggiSlideshow\hidden.txt`, one full
   path per line. The scan and folder order leave them out from then on. To bring one back, delete
   its line; blank lines and lines starting with `#` are ignored, and case doesn't matter.
+- **Skipped files** are kept in `%LOCALAPPDATA%\ViggiSlideshow\skipped.txt`, which outlives the
+  log's 2 MB roll: one tab-separated line per file with how many times it was skipped, when first
+  and last, its path and the latest reason, sorted by path so a folder's broken files sit together.
+  A file that has gone missing isn't listed. A file stays listed after it is fixed; delete its line.
 - **Settings** live in `HKCU\SOFTWARE\ViggiSlideshow`, the same values the old WinForms version used.
 
 ## Development

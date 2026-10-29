@@ -15,6 +15,7 @@ internal sealed class Slideshow : IDisposable
     private static readonly TimeSpan LoadTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
     private const int FailuresBeforePause = 25;
+    private const string VideosOff = "videos are off here";
 
     private readonly SlideshowSurface _surface;
     private readonly Settings _settings;
@@ -50,6 +51,9 @@ internal sealed class Slideshow : IDisposable
 
     /// <summary>A file reached the screen.</summary>
     public event Action<string>? FileShown;
+
+    /// <summary>Where skipped files are kept across runs; null keeps no record.</summary>
+    public SkippedFiles? Skipped { get; init; }
 
     /// <summary>A file was skipped because it couldn't be shown, with the reason.</summary>
     public event Action<string, string>? FileFailed;
@@ -209,7 +213,7 @@ internal sealed class Slideshow : IDisposable
     {
         if (_vlc is null)
         {
-            Fail(path, "videos are off here");
+            Fail(path, VideosOff);
             return;
         }
 
@@ -342,6 +346,7 @@ internal sealed class Slideshow : IDisposable
             StopVideo();
         _playlist.MarkBad(path);
         FileFailed?.Invoke(path, reason);
+        RecordSkipped(path, reason);
 
         // A run of failures usually means the drive went away; don't spin
         _failuresInARow++;
@@ -355,6 +360,20 @@ internal sealed class Slideshow : IDisposable
         {
             Retry(TimeSpan.Zero);
         }
+    }
+
+    // Off the UI thread, since the file is rewritten under a lock other screensavers share. A file
+    // that's gone (the drive went away, or it was moved) isn't broken, so it isn't listed; nor is
+    // a video skipped only because videos are off.
+    private void RecordSkipped(string path, string reason)
+    {
+        if (Skipped is not { } skipped || reason == VideosOff)
+            return;
+        Task.Run(() =>
+        {
+            if (File.Exists(path))
+                skipped.Record(path, reason);
+        });
     }
 
     private void Retry(TimeSpan delay)

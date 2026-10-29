@@ -17,6 +17,7 @@ internal sealed class ScreensaverSession
     private readonly RegistrySettingsStore _store = new();
     private readonly Settings _settings;
     private readonly MediaLibrary _library = new(hidden: HiddenFiles.Load(HiddenFiles.DefaultPath));
+    private readonly SkippedFiles _skipped = new(SkippedFiles.DefaultPath);
     private readonly CancellationTokenSource _scanCancel = new();
     private readonly List<(ScreensaverWindow Window, Slideshow Slideshow)> _screens = new();
     private LibVLC? _vlc;
@@ -40,7 +41,7 @@ internal sealed class ScreensaverSession
         {
             var surface = new SlideshowSurface(textScale: Math.Clamp(monitor.Bounds.Height / 1080.0, 0.8, 2.0));
             var slideshow = new Slideshow(surface, _settings, _library, _vlc, audio: monitor.Primary, labels: true,
-                monitor.Bounds.Width, monitor.Bounds.Height);
+                monitor.Bounds.Width, monitor.Bounds.Height) { Skipped = _skipped };
             var window = new ScreensaverWindow(monitor.Bounds, surface);
 
             window.PreviewKeyDown += (_, e) =>

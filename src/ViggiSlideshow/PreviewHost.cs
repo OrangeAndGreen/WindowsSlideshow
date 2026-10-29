@@ -56,7 +56,10 @@ internal sealed class PreviewHost
                 library.ScanComplete = true;
         });
 
-        _slideshow = new Slideshow(surface, settings, library, vlc: null, audio: false, labels: false, client.Width, client.Height);
+        _slideshow = new Slideshow(surface, settings, library, vlc: null, audio: false, labels: false, client.Width, client.Height)
+        {
+            Skipped = new SkippedFiles(SkippedFiles.DefaultPath),
+        };
         _slideshow.Start();
 
         // Windows closes the preview window without telling us
