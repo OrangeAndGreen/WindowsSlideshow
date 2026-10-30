@@ -56,7 +56,12 @@ public sealed class Playlist
         return next;
     }
 
-    public string? Previous() => _history.CanGoBack ? _history.Back() : null;
+    /// <summary>
+    /// Steps back to the nearest earlier file the mode allows, so going back in videos-only
+    /// mode doesn't turn up the photos shown before it. Null when there is none.
+    /// </summary>
+    public string? Previous(VideoMode mode = VideoMode.Mixed) =>
+        _history.Back(path => MediaFiles.Matches(MediaFiles.Classify(path), mode) && !_library.IsBad(path));
 
     public void MarkBad(string path)
     {
@@ -76,12 +81,18 @@ public sealed class Playlist
     {
         _walker ??= _walkerFactory(_history.Current ?? ResumeAfter);
 
-        // The walker yields each file once per pass, so a pass of bad files ends the loop
+        // The walker yields each file once per pass, so meeting the first bad file again means
+        // every file the mode allows is bad or hidden (say, every video hidden with X)
+        string? firstBad = null;
         for (int guard = 0; guard < 100_000; guard++)
         {
             string? path = _walker.Next(mode);
             if (path is null || !_library.IsBad(path))
                 return path;
+            if (firstBad is null)
+                firstBad = path;
+            else if (string.Equals(firstBad, path, StringComparison.OrdinalIgnoreCase))
+                return null;
         }
         return null;
     }

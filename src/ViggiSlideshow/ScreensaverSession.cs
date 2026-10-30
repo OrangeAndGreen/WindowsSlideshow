@@ -165,10 +165,10 @@ internal sealed class ScreensaverSession
                 Flash(_settings.Random ? "Random order" : "Folder order");
                 break;
             case Command.CycleVideos:
-                _settings.VideoMode = _settings.VideoMode.Next();
-                Save();
-                Flash(_settings.VideoMode.Describe());
-                Each(s => s.ApplyVideoMode());
+                SetVideoMode(_settings.VideoMode.Next());
+                break;
+            case Command.ToggleVideosOnly:
+                SetVideoMode(_settings.VideoMode.ToggleVideosOnly());
                 break;
             case Command.SetInterval:
                 _settings.IntervalMs = Settings.IntervalForDigit(command.Digit);
@@ -202,6 +202,15 @@ internal sealed class ScreensaverSession
         }
         Log.Info(added ? $"Hidden from the show: {path}" : $"Already hidden: {path}");
         source.Flash($"Hidden for good: {Path.GetFileName(path)}");
+    }
+
+    private void SetVideoMode(VideoMode mode)
+    {
+        _settings.VideoMode = mode;
+        Save();
+        Flash(mode.Describe());
+        Each(s => s.ApplyVideoMode());
+        Each(s => s.UpdateLabel());
     }
 
     private void SaveAndRelabel()

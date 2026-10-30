@@ -46,7 +46,11 @@ public sealed class SequentialWalker
             if (_stack.Count == 0)
             {
                 if (_passFromRoot && !_foundThisPass)
+                {
+                    // Start afresh next time, which may ask for another mode
+                    _passFromRoot = false;
                     return null;
+                }
                 _stack.Push(Read(_root));
                 _passFromRoot = true;
                 _foundThisPass = false;

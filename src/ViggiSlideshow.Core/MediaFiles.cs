@@ -49,6 +49,10 @@ public static class MediaFiles
         _ => VideoMode.Mixed,
     };
 
+    /// <summary>The W key: straight to videos only, and from there back to the mixed show.</summary>
+    public static VideoMode ToggleVideosOnly(this VideoMode mode) =>
+        mode == VideoMode.VideosOnly ? VideoMode.Mixed : VideoMode.VideosOnly;
+
     public static string Describe(this VideoMode mode) => mode switch
     {
         VideoMode.PhotosOnly => "Photos only",

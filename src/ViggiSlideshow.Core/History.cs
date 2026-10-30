@@ -30,6 +30,23 @@ public sealed class History
         return Current;
     }
 
+    /// <summary>
+    /// Steps back to the nearest earlier item that passes the test, or returns null and stays
+    /// put when none does.
+    /// </summary>
+    public string? Back(Func<string, bool> accept)
+    {
+        for (int i = _cursor - 1; i >= 0; i--)
+        {
+            if (accept(_items[i]))
+            {
+                _cursor = i;
+                return _items[i];
+            }
+        }
+        return null;
+    }
+
     /// <summary>Moves to the next item already seen, or returns null at the newest one.</summary>
     public string? Forward()
     {

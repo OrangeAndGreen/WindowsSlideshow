@@ -42,6 +42,10 @@ internal sealed class Slideshow : IDisposable
     private bool _paused;
     private bool _disposed;
 
+    // Set when the chosen mode found nothing in the folder (videos only, with no videos):
+    // this screen shows photos and videos until the mode is changed
+    private bool _fellBack;
+
     public bool ShowDebug { get; set; }
     public bool ShowHelp { get; set; }
     public bool ShowSettings { get; set; }
@@ -95,7 +99,7 @@ internal sealed class Slideshow : IDisposable
         };
     }
 
-    private VideoMode Mode => _vlc is null ? VideoMode.PhotosOnly : _settings.VideoMode;
+    private VideoMode Mode => _vlc is null ? VideoMode.PhotosOnly : _fellBack ? VideoMode.Mixed : _settings.VideoMode;
 
     public void Start() => Advance(1);
 
@@ -110,7 +114,7 @@ internal sealed class Slideshow : IDisposable
         _retryTimer.Stop();
         _direction = direction;
 
-        string? path = direction < 0 ? _playlist.Previous() : _playlist.Next(Mode);
+        string? path = direction < 0 ? _playlist.Previous(Mode) : _playlist.Next(Mode);
 
         if (path is null && direction < 0)
         {
@@ -123,11 +127,25 @@ internal sealed class Slideshow : IDisposable
 
         if (path is null)
         {
-            bool stillLooking = !_library.ScanComplete && _settings.Random;
-            _surface.SetStatus(stillLooking
-                ? $"Looking for pictures in {_settings.Folder}…"
-                : $"No {Describe(Mode)} found in {_settings.Folder}");
-            Retry(stillLooking ? TimeSpan.FromMilliseconds(300) : TimeSpan.FromSeconds(10));
+            VideoMode mode = Mode;
+            switch (EmptyShow.Decide(mode, canFallBack: _vlc is not null && !_fellBack, _settings.Random, _library.ScanComplete))
+            {
+                case EmptyShowAction.KeepLooking:
+                    _surface.SetStatus($"Looking for {Describe(mode)} in {_settings.Folder}…");
+                    Retry(TimeSpan.FromMilliseconds(300));
+                    break;
+                case EmptyShowAction.FallBackToMixed:
+                    // The setting stays as chosen, so a folder that has videos gets them next run
+                    _fellBack = true;
+                    Log.Info($"No {Describe(mode)} to show in {_settings.Folder}; showing photos and videos this run");
+                    _surface.Flash(EmptyShow.FallbackMessage(mode));
+                    Retry(TimeSpan.Zero);
+                    break;
+                default:
+                    _surface.SetStatus($"No {Describe(mode)} found in {_settings.Folder}");
+                    Retry(TimeSpan.FromSeconds(10));
+                    break;
+            }
             return;
         }
 
@@ -437,6 +455,7 @@ internal sealed class Slideshow : IDisposable
     /// <summary>Moves on when what's showing is no longer allowed.</summary>
     public void ApplyVideoMode()
     {
+        _fellBack = false;
         if (Current is { } current && !MediaFiles.Matches(MediaFiles.Classify(current), Mode))
             Advance(1);
     }
@@ -469,7 +488,7 @@ internal sealed class Slideshow : IDisposable
         "Settings",
         $"Folder:     {_settings.Folder}",
         $"Order:      {(_settings.Random ? "Random" : "Folder order")}",
-        $"Showing:    {_settings.VideoMode.Describe()}",
+        $"Showing:    {_settings.VideoMode.Describe()}{(_fellBack ? $" (none here, so {Mode.Describe().ToLowerInvariant()})" : "")}",
         $"Sound:      {(_settings.Mute ? "Off" : "On")}",
         $"Each photo: {_settings.IntervalMs / 1000.0:0.#} s",
         $"Videos:     up to {_settings.VideoMaxSeconds} s",
