@@ -170,6 +170,13 @@ internal sealed class ScreensaverSession
             case Command.ToggleVideosOnly:
                 SetVideoMode(_settings.VideoMode.ToggleVideosOnly());
                 break;
+            case Command.ToggleFillVideos:
+                _settings.FillVideos = !_settings.FillVideos;
+                Save();
+                Each(s => s.ApplyFillVideos());
+                Each(s => s.UpdateLabel());
+                Flash(_settings.FillVideos ? "Videos fill the screen" : "Videos fit the screen");
+                break;
             case Command.SetInterval:
                 _settings.IntervalMs = Settings.IntervalForDigit(command.Digit);
                 Save();

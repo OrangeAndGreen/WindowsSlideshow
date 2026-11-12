@@ -25,6 +25,7 @@ without switching screensavers.
 | I | Show or hide file info: size, date taken, camera, files in the folder |
 | V | Photos and videos → photos only → videos only |
 | W | Videos only on or off (off goes back to photos and videos). Back skips the photos too. If the folder has no videos, the show says so and shows photos and videos for the rest of the run |
+| Z | Videos fit the screen (black bars) or fill it (the edges are cropped, nothing is stretched out of shape). Photos always fit |
 | M | Sound on or off |
 | R | Random or folder order (folder order carries on from the picture on screen) |
 | 1-5, 6, 7, 8, 9 | Seconds per photo: 1-5, 10, 20, 30, 60; 0 for the default (5) |

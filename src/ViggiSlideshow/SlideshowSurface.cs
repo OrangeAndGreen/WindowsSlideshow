@@ -16,7 +16,16 @@ internal sealed class SlideshowSurface : Grid
     private sealed class Layer
     {
         public readonly Image Image = new() { Stretch = Stretch.Fill };
-        public readonly Viewbox Box = new() { Stretch = Stretch.Uniform, StretchDirection = StretchDirection.Both, Opacity = 0 };
+        // Centered, so a picture that fills the screen and overflows it is cropped evenly on both sides
+        public readonly Viewbox Box = new()
+        {
+            Stretch = Stretch.Uniform,
+            StretchDirection = StretchDirection.Both,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Opacity = 0,
+        };
+        public bool IsVideo;
 
         public Layer()
         {
@@ -30,6 +39,7 @@ internal sealed class SlideshowSurface : Grid
 
     private readonly Layer[] _layers = [new Layer(), new Layer()];
     private int _front;
+    private bool _fillVideos;
 
     private readonly Border _label;
     private readonly TextBlock _labelText;
@@ -103,13 +113,16 @@ internal sealed class SlideshowSurface : Grid
 
     /// <summary>Fades the new picture in over the old one.</summary>
     /// <param name="width">The width to lay the picture out at, which corrects non-square pixels.</param>
-    public void Show(ImageSource source, double width, double height, int rotation, int fadeMs)
+    /// <param name="isVideo">A video frame, which fills the screen when <see cref="FillVideos"/> is on.</param>
+    public void Show(ImageSource source, double width, double height, int rotation, int fadeMs, bool isVideo = false)
     {
         Layer outgoing = _layers[_front];
         _front = 1 - _front;
         Layer incoming = _layers[_front];
 
         incoming.Image.Source = source;
+        incoming.IsVideo = isVideo;
+        ApplyStretch(incoming);
         SetGeometry(incoming, width, height, rotation);
         Panel.SetZIndex(incoming.Box, 1);
         Panel.SetZIndex(outgoing.Box, 0);
@@ -146,6 +159,24 @@ internal sealed class SlideshowSurface : Grid
     }
 
     public bool IsShowing(ImageSource source) => _layers[_front].Image.Source == source;
+
+    /// <summary>
+    /// Videos fill the screen and lose their edges (UniformToFill), or fit inside it with black
+    /// bars (Uniform). Photos always fit. A video already on screen changes at once.
+    /// </summary>
+    public bool FillVideos
+    {
+        get => _fillVideos;
+        set
+        {
+            _fillVideos = value;
+            foreach (Layer layer in _layers)
+                ApplyStretch(layer);
+        }
+    }
+
+    private void ApplyStretch(Layer layer) =>
+        layer.Box.Stretch = layer.IsVideo && _fillVideos ? Stretch.UniformToFill : Stretch.Uniform;
 
     public void SetLabel(string text, Corner corner, bool table)
     {

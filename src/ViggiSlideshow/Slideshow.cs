@@ -76,6 +76,7 @@ internal sealed class Slideshow : IDisposable
         _pixelWidth = pixelWidth;
         _pixelHeight = pixelHeight;
         _ui = surface.Dispatcher;
+        surface.FillVideos = settings.FillVideos;
 
         var fileSystem = new RealFileSystem();
         _playlist = new Playlist(library, start => new SequentialWalker(fileSystem, settings.Folder, start),
@@ -269,7 +270,7 @@ internal sealed class Slideshow : IDisposable
                 return;
 
             var (width, height) = Geometry(bitmap.PixelWidth, bitmap.PixelHeight, _videoDetails);
-            _surface.Show(bitmap, width, height, 0, shown ? 0 : _settings.FadeMs);
+            _surface.Show(bitmap, width, height, 0, shown ? 0 : _settings.FadeMs, isVideo: true);
             if (!shown)
             {
                 shown = true;
@@ -460,6 +461,8 @@ internal sealed class Slideshow : IDisposable
             Advance(1);
     }
 
+    public void ApplyFillVideos() => _surface.FillVideos = _settings.FillVideos;
+
     public void Flash(string message) => _surface.Flash(message);
 
     public void UpdateLabel()
@@ -491,7 +494,7 @@ internal sealed class Slideshow : IDisposable
         $"Showing:    {_settings.VideoMode.Describe()}{(_fellBack ? $" (none here, so {Mode.Describe().ToLowerInvariant()})" : "")}",
         $"Sound:      {(_settings.Mute ? "Off" : "On")}",
         $"Each photo: {_settings.IntervalMs / 1000.0:0.#} s",
-        $"Videos:     up to {_settings.VideoMaxSeconds} s",
+        $"Videos:     up to {_settings.VideoMaxSeconds} s, {(_settings.FillVideos ? "fill the screen" : "fit the screen")}",
         $"Fade:       {_settings.FadeMs} ms");
 
     public void Dispose()

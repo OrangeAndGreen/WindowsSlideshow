@@ -86,6 +86,17 @@ public class SettingsTests
         Assert.Equal(@"D:\x\1.jpg", settings.LastFile);
     }
 
+    [Fact]
+    public void Videos_fit_the_screen_until_fill_is_saved()
+    {
+        var store = new DictionaryStore();
+        Assert.False(Settings.Load(store).FillVideos);
+
+        new Settings { FillVideos = true }.Save(store);
+
+        Assert.True(Settings.Load(store).FillVideos);
+    }
+
     [Theory]
     [InlineData(1, 1000)]
     [InlineData(5, 5000)]
@@ -105,6 +116,7 @@ public class KeyMapTests
     [InlineData("Escape", Command.Quit)]
     [InlineData("V", Command.CycleVideos)]
     [InlineData("M", Command.ToggleMute)]
+    [InlineData("Z", Command.ToggleFillVideos)]
     [InlineData("LeftShift", Command.None)]
     public void Maps_keys(string key, Command expected) => Assert.Equal(expected, KeyMap.Map(key).Command);
 

@@ -26,6 +26,9 @@ public sealed class Settings
     public int IntervalMs { get; set; } = DefaultIntervalMs;
     public bool Mute { get; set; }
     public VideoMode VideoMode { get; set; } = VideoMode.Mixed;
+
+    /// <summary>Videos fill the screen, cropping what doesn't fit, rather than fitting inside it with black bars.</summary>
+    public bool FillVideos { get; set; }
     public int VideoMaxSeconds { get; set; } = DefaultVideoMaxSeconds;
     public int FadeMs { get; set; } = DefaultFadeMs;
 
@@ -50,6 +53,7 @@ public sealed class Settings
         else if (ReadBool(store, "VideosOnly", false))
             settings.VideoMode = VideoMode.VideosOnly;
 
+        settings.FillVideos = ReadBool(store, "FillVideos", settings.FillVideos);
         settings.VideoMaxSeconds = Clamp(store.GetInt("VideoMaxSeconds"), 5, 3600, DefaultVideoMaxSeconds);
         settings.FadeMs = Clamp(store.GetInt("FadeMs"), 0, 5000, DefaultFadeMs);
         settings.LastFile = store.GetString("LastFile") is { Length: > 0 } last ? last : null;
@@ -66,6 +70,7 @@ public sealed class Settings
         store.SetString("Mute", Mute.ToString());
         store.SetString("Videos", VideoMode.ToString());
         store.SetString("VideosOnly", (VideoMode == VideoMode.VideosOnly).ToString());
+        store.SetString("FillVideos", FillVideos.ToString());
         store.SetInt("VideoMaxSeconds", VideoMaxSeconds);
         store.SetInt("FadeMs", FadeMs);
         store.SetString("LastFile", LastFile ?? "");
